@@ -33,7 +33,7 @@ func generateRandomLetters(n int) string {
 }
 
 func generateMessageID() string {
-    randomBytes := make([]byte, 16)
+    randomBytes := make([]byte, 5)
     rand.Read(randomBytes)
     timestamp := time.Now().Unix()
     domain := generateRandomLetters(5)
@@ -172,7 +172,7 @@ func main() {
     headers := fromHeader +
         fmt.Sprintf("To: %s\r\n", toEmail.Address) +
         fmt.Sprintf("Message-ID: %s\r\n", messageID) +
-        "User-Agent: mm v0.1.0\r\n"
+        "User-Agent: Mini Mailer v0.1.0\r\n"
 
     if *debug {
         fmt.Println("SMTP: DATA")
