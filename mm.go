@@ -24,7 +24,7 @@ func generateRandomLetters(n int) string {
     randomBytes := make([]byte, n)
     _, err := rand.Read(randomBytes)
     if err != nil {
-        return "xxxxx"  // fallback in case of error
+        return "xxxxx" // fallback in case of error
     }
     for i := range b {
         b[i] = letters[randomBytes[i]%26]
@@ -68,33 +68,77 @@ func parseEmailHeader(line string) EmailAddress {
     return EmailAddress{Address: line}
 }
 
+func extractToHeader(headers string) string {
+    lines := strings.Split(headers, "\r\n")
+    for _, line := range lines {
+        if strings.HasPrefix(line, "To:") {
+            return strings.TrimSpace(strings.TrimPrefix(line, "To:"))
+        }
+    }
+    return ""
+}
+
 func main() {
     debug := flag.Bool("d", false, "Enable debug output")
     username := flag.String("u", "", "SMTP username (optional)")
     password := flag.String("p", "", "SMTP password (optional)")
     flag.Parse()
-    
+
     args := flag.Args()
     if len(args) != 2 {
         fmt.Println("Usage: mm [-d] [-u username] [-p password] smtp-server port < message_with_headers.txt")
         os.Exit(1)
     }
-    
+
     host := args[0]
     port := args[1]
-    
+
     scanner := bufio.NewScanner(os.Stdin)
-    var fromEmail, toEmail EmailAddress
-    var fromFull, toFull string
-    
-    if scanner.Scan() {
-        fromFull = scanner.Text()
-        fromEmail = parseEmailHeader(fromFull)
+    var headers, body string
+    var fromEmail EmailAddress
+
+    // Default From: header
+    fromEmail = EmailAddress{Name: "Mini Mailer", Address: "noreply@mini.mailer.msg"}
+    hasFromHeader := false
+
+    // Read headers until an empty line is found
+    for scanner.Scan() {
+        line := scanner.Text()
+        if line == "" {
+            break // Empty line indicates the end of headers
+        }
+        headers += line + "\r\n"
+
+        // Check if the line is a From: header
+        if strings.HasPrefix(line, "From:") {
+            fromEmail = parseEmailHeader(line)
+            hasFromHeader = true
+        }
     }
-    if scanner.Scan() {
-        toFull = scanner.Text()
-        toEmail = parseEmailHeader(toFull)
+
+    // If no From: header was found, add the default one
+    if !hasFromHeader {
+        headers = fmt.Sprintf("From: %s <%s>\r\n", fromEmail.Name, fromEmail.Address) + headers
     }
+
+    // Read the rest as the message body
+    for scanner.Scan() {
+        body += scanner.Text() + "\r\n"
+    }
+
+    // If no headers were found, exit with an error
+    if headers == "" {
+        fmt.Println("Error: No headers found in the input")
+        os.Exit(1)
+    }
+
+    // Extract the To: header
+    toHeader := extractToHeader(headers)
+    if toHeader == "" {
+        fmt.Println("Error: No To: header found in the input")
+        os.Exit(1)
+    }
+    toEmail := parseEmailHeader(toHeader)
 
     if *debug {
         fmt.Printf("Connecting to %s:%s via SOCKS5 proxy\n", host, port)
@@ -161,29 +205,18 @@ func main() {
     }
 
     messageID := generateMessageID()
-    
-    var fromHeader string
-    if fromEmail.Name != "" {
-        fromHeader = fmt.Sprintf("From: %s <%s>\r\n", fromEmail.Name, fromEmail.Address)
-    } else {
-        fromHeader = fmt.Sprintf("From: <%s>\r\n", fromEmail.Address)
-    }
-    
-    headers := fromHeader +
-        fmt.Sprintf("To: %s\r\n", toEmail.Address) +
-        fmt.Sprintf("Message-ID: %s\r\n", messageID) +
-        "User-Agent: Mini Mailer v0.1.0\r\n"
+
+    // Add the Message-ID header
+    headers += fmt.Sprintf("Message-ID: %s\r\n", messageID)
+
+    // Build the final message
+    message := headers + "\r\n" + body
 
     if *debug {
         fmt.Println("SMTP: DATA")
         fmt.Println("Headers being sent:")
         fmt.Print(headers)
         fmt.Println("--- Message body omitted ---")
-    }
-
-    message := headers
-    for scanner.Scan() {
-        message += scanner.Text() + "\r\n"
     }
 
     _, err = w.Write([]byte(message))
