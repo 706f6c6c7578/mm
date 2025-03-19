@@ -11,11 +11,19 @@ import (
     "strings"
     "time"
     "golang.org/x/net/proxy"
+    "gopkg.in/yaml.v2"
 )
 
 type EmailAddress struct {
     Name    string
     Address string
+}
+
+type Config struct {
+    SMTPHost string `yaml:"smtp_host"`
+    SMTPPort string `yaml:"smtp_port"`
+    Username string `yaml:"username"`
+    Password string `yaml:"password"`
 }
 
 func generateRandomLetters(n int) string {
@@ -78,20 +86,57 @@ func extractToHeader(headers string) string {
     return ""
 }
 
+func loadConfig(filename string) (*Config, error) {
+    data, err := os.ReadFile(filename)
+    if err != nil {
+        return nil, err
+    }
+
+    var config Config
+    err = yaml.Unmarshal(data, &config)
+    if err != nil {
+        return nil, err
+    }
+
+    return &config, nil
+}
+
 func main() {
     debug := flag.Bool("d", false, "Enable debug output")
     username := flag.String("u", "", "SMTP username (optional)")
     password := flag.String("p", "", "SMTP password (optional)")
+    configFile := flag.String("c", "", "Path to config file (optional)")
     flag.Parse()
 
-    args := flag.Args()
-    if len(args) != 2 {
-        fmt.Println("Usage: mm [-d] [-u username] [-p password] smtp-server port < message_with_headers.txt")
-        os.Exit(1)
-    }
+    var host, port string
+    var config *Config
 
-    host := args[0]
-    port := args[1]
+    // Load config file if -c flag is set
+    if *configFile != "" {
+        var err error
+        config, err = loadConfig(*configFile)
+        if err != nil {
+            fmt.Println("Error loading config file:", err)
+            os.Exit(1)
+        }
+        host = config.SMTPHost
+        port = config.SMTPPort
+        if *username == "" {
+            *username = config.Username
+        }
+        if *password == "" {
+            *password = config.Password
+        }
+    } else {
+        // Use command-line arguments for host and port
+        args := flag.Args()
+        if len(args) != 2 {
+            fmt.Println("Usage: mm [-d] [-u username] [-p password] [-c configfile] [smtp-server port] < message_with_headers.txt")
+            os.Exit(1)
+        }
+        host = args[0]
+        port = args[1]
+    }
 
     scanner := bufio.NewScanner(os.Stdin)
     var headers, body string
@@ -103,18 +148,28 @@ func main() {
 
     // Read headers until an empty line is found
     for scanner.Scan() {
-        line := scanner.Text()
-        if line == "" {
-            break // Empty line indicates the end of headers
-        }
-        headers += line + "\r\n"
-
-        // Check if the line is a From: header
-        if strings.HasPrefix(line, "From:") {
-            fromEmail = parseEmailHeader(line)
-            hasFromHeader = true
-        }
+    line := scanner.Text()
+    if line == "" {
+        break // Empty line indicates the end of headers
     }
+    headers += line + "\r\n" // Normalize to CRLF
+
+    // Check if the line is a From: header
+    if strings.HasPrefix(line, "From:") {
+        fromEmail = parseEmailHeader(line)
+        hasFromHeader = true
+    }
+}
+
+// If no From: header was found, add the default one
+if !hasFromHeader {
+    headers = fmt.Sprintf("From: %s <%s>\r\n", fromEmail.Name, fromEmail.Address) + headers
+}
+
+// Read the rest as the message body
+for scanner.Scan() {
+    body += scanner.Text() + "\r\n" // Normalize to CRLF
+}
 
     // If no From: header was found, add the default one
     if !hasFromHeader {
