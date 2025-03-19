@@ -11,7 +11,7 @@ import (
     "strings"
     "time"
     "golang.org/x/net/proxy"
-    "gopkg.in/yaml.v2"
+    "gopkg.in/yaml.v2" // Importiere das YAML-Paket für die Konfigurationsdatei
 )
 
 type EmailAddress struct {
@@ -253,6 +253,9 @@ func main() {
 
     // Add the Message-ID header
     headers += fmt.Sprintf("Message-ID: %s\r\n", messageID)
+
+    // Add the User-Agent header
+    headers += fmt.Sprintf("User-Agent: Mini Mailer v0.1.0\r\n")
 
     // Build the final message
     message := headers + "\r\n" + body
