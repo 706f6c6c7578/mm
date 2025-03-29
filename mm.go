@@ -143,7 +143,7 @@ func main() {
     var fromEmail EmailAddress
 
     // Default From: header
-    fromEmail = EmailAddress{Name: "Mini Mailer", Address: "noreply@mini.mailer.msg"}
+    fromEmail = EmailAddress{Name: "Mini Mailer", Address: "bounce.me@mini.mailer.msg"}
     hasFromHeader := false
 
     // Read headers until an empty line is found
