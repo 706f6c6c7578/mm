@@ -28,7 +28,7 @@ type Config struct {
 	Password string `yaml:"password"`
 }
 
-// Only 8 core NNTP headers get special ordering
+// Only 11 core NNTP headers get special ordering
 var headerPriority = map[string]int{
 	"from":         1,
 	"reply-to":     2,
@@ -43,7 +43,6 @@ var headerPriority = map[string]int{
 	"organization": 11,
 	// All other headers sorted alphabetically
 }
-
 func generateRandomLetters(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, n)
@@ -95,6 +94,21 @@ func loadConfig(filename string) (*Config, error) {
 	return &config, err
 }
 
+func collectReferences(scanner *bufio.Scanner, initialLine string) string {
+	var refs strings.Builder
+	refs.WriteString(strings.TrimPrefix(initialLine, "References:"))
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || (!strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t")) {
+			break
+		}
+		refs.WriteString(" " + strings.TrimSpace(line))
+	}
+	
+	return refs.String()
+}
+
 func sortHeaders(headers map[string]string) string {
 	var priorityHeaders, otherHeaders []string
 
@@ -106,21 +120,23 @@ func sortHeaders(headers map[string]string) string {
 		}
 	}
 
-	// Sort priority headers by their priority number
 	sort.Strings(priorityHeaders)
-	// Sort other headers alphabetically
 	sort.Strings(otherHeaders)
 
 	var result strings.Builder
 	
-	// Write priority headers first
 	for _, h := range priorityHeaders {
 		parts := strings.SplitN(h, "|", 2)
 		key := parts[1]
-		result.WriteString(fmt.Sprintf("%s: %s\r\n", key, headers[key]))
+		value := headers[key]
+		
+		if strings.EqualFold(key, "References") && strings.Contains(value, " <") {
+			result.WriteString(fmt.Sprintf("%s:%s\r\n", key, value))
+		} else {
+			result.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
+		}
 	}
 	
-	// Then all other headers
 	for _, key := range otherHeaders {
 		result.WriteString(fmt.Sprintf("%s: %s\r\n", key, headers[key]))
 	}
@@ -173,12 +189,18 @@ func main() {
 	var hasFrom bool
 	fromEmail := EmailAddress{Name: "Mini Mailer", Address: "bounce.me@mini.mailer.msg"}
 
+	// Parse headers
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			break
 		}
-		
+
+		if strings.HasPrefix(line, "References:") {
+			headers["References"] = collectReferences(scanner, line)
+			continue
+		}
+
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
@@ -192,18 +214,18 @@ func main() {
 		}
 	}
 
+	// Read body
 	for scanner.Scan() {
 		body.WriteString(scanner.Text() + "\r\n")
 	}
 
+	// Ensure required headers
 	if !hasFrom {
 		headers["From"] = fmt.Sprintf("%s <%s>", fromEmail.Name, fromEmail.Address)
 	}
-
 	if _, exists := headers["Message-ID"]; !exists {
 		headers["Message-ID"] = generateMessageID()
 	}
-
 	headers["User-Agent"] = "Mini Mailer v0.1.2"
 
 	sortedHeaders := sortHeaders(headers)
