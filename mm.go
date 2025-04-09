@@ -36,10 +36,10 @@ var headerPriority = map[string]int{
 	"subject":      4,
 	"date":         5,
 	"message-id":   6,
-	"mime-version": 7,
-	"content-transfer-encoding": 8,
-	"content-type": 9,  
-	"references":   10,
+	"references":   7,
+	"mime-version": 8,
+	"content-transfer-encoding": 9,
+	"content-type": 10,  
 	"organization": 11,
 	// All other headers sorted alphabetically
 }
