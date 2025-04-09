@@ -36,8 +36,11 @@ var headerPriority = map[string]int{
 	"subject":      4,
 	"date":         5,
 	"message-id":   6,
-	"references":   7,
-	"organization": 8,
+	"mime-version": 7,
+	"content-transfer-encoding": 8,
+	"content-type": 9,  
+	"references":   10,
+	"organization": 11,
 	// All other headers sorted alphabetically
 }
 
@@ -201,7 +204,7 @@ func main() {
 		headers["Message-ID"] = generateMessageID()
 	}
 
-	headers["User-Agent"] = "Mini Mailer v0.1.1"
+	headers["User-Agent"] = "Mini Mailer v0.1.2"
 
 	sortedHeaders := sortHeaders(headers)
 	message := sortedHeaders + "\r\n" + body.String()
