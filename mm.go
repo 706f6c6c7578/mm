@@ -43,6 +43,7 @@ var headerPriority = map[string]int{
 	"organization": 11,
 	// All other headers sorted alphabetically
 }
+
 func generateRandomLetters(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, n)
@@ -94,22 +95,22 @@ func loadConfig(filename string) (*Config, error) {
 	return &config, err
 }
 
-func collectReferences(scanner *bufio.Scanner, initialLine string) string {
-	var refs strings.Builder
-	refs.WriteString(strings.TrimPrefix(initialLine, "References:"))
+func collectFoldedHeader(scanner *bufio.Scanner, initialLine string) string {
+	var header strings.Builder
+	header.WriteString(initialLine)
 	
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" || (!strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t")) {
 			break
 		}
-		refs.WriteString(" " + strings.TrimSpace(line))
+		header.WriteString("\r\n" + line) // Preserve original folding
 	}
 	
-	return refs.String()
+	return header.String()
 }
 
-func sortHeaders(headers map[string]string) string {
+func sortHeaders(headers map[string]string) []string {
 	var priorityHeaders, otherHeaders []string
 
 	for key := range headers {
@@ -123,25 +124,19 @@ func sortHeaders(headers map[string]string) string {
 	sort.Strings(priorityHeaders)
 	sort.Strings(otherHeaders)
 
-	var result strings.Builder
+	var sorted []string
 	
 	for _, h := range priorityHeaders {
 		parts := strings.SplitN(h, "|", 2)
 		key := parts[1]
-		value := headers[key]
-		
-		if strings.EqualFold(key, "References") && strings.Contains(value, " <") {
-			result.WriteString(fmt.Sprintf("%s:%s\r\n", key, value))
-		} else {
-			result.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
-		}
+		sorted = append(sorted, headers[key])
 	}
 	
 	for _, key := range otherHeaders {
-		result.WriteString(fmt.Sprintf("%s: %s\r\n", key, headers[key]))
+		sorted = append(sorted, headers[key])
 	}
 
-	return result.String()
+	return sorted
 }
 
 func main() {
@@ -189,7 +184,7 @@ func main() {
 	var hasFrom bool
 	fromEmail := EmailAddress{Name: "Mini Mailer", Address: "bounce.me@mini.mailer.msg"}
 
-	// Parse headers
+	// Parse headers while preserving original folding
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -197,15 +192,15 @@ func main() {
 		}
 
 		if strings.HasPrefix(line, "References:") {
-			headers["References"] = collectReferences(scanner, line)
+			headers["References"] = collectFoldedHeader(scanner, line)
 			continue
 		}
 
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			headers[key] = value
+			// For other headers, just store the first line
+			headers[key] = line
 			
 			if strings.EqualFold(key, "From") {
 				fromEmail = parseEmailHeader(line)
@@ -221,15 +216,19 @@ func main() {
 
 	// Ensure required headers
 	if !hasFrom {
-		headers["From"] = fmt.Sprintf("%s <%s>", fromEmail.Name, fromEmail.Address)
+		headers["From"] = fmt.Sprintf("From: %s <%s>", fromEmail.Name, fromEmail.Address)
 	}
 	if _, exists := headers["Message-ID"]; !exists {
-		headers["Message-ID"] = generateMessageID()
+		headers["Message-ID"] = fmt.Sprintf("Message-ID: %s", generateMessageID())
 	}
-	headers["User-Agent"] = "Mini Mailer v0.1.2"
+	headers["User-Agent"] = "User-Agent: Mini Mailer v0.1.2"
 
-	sortedHeaders := sortHeaders(headers)
-	message := sortedHeaders + "\r\n" + body.String()
+	// Build message with original folding preserved
+	var message strings.Builder
+	for _, header := range sortHeaders(headers) {
+		message.WriteString(header + "\r\n")
+	}
+	message.WriteString("\r\n" + body.String())
 
 	dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
 	if err != nil {
@@ -295,11 +294,10 @@ func main() {
 	if *debug {
 		fmt.Println("SMTP: DATA")
 		fmt.Println("Headers being sent:")
-		fmt.Print(sortedHeaders)
-		fmt.Println("--- Message body omitted ---")
+		fmt.Print(message.String()) // Show complete headers with original folding
 	}
 
-	_, err = w.Write([]byte(message))
+	_, err = w.Write([]byte(message.String()))
 	if err != nil {
 		fmt.Println("Error writing message:", err)
 		os.Exit(1)
