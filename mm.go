@@ -20,10 +20,11 @@ type EmailAddress struct {
 }
 
 type Config struct {
-    SMTPHost string `yaml:"smtp_host"`
-    SMTPPort string `yaml:"smtp_port"`
-    Username string `yaml:"username"`
-    Password string `yaml:"password"`
+    SMTPHost  string `yaml:"smtp_host"`
+    SMTPPort  string `yaml:"smtp_port"`
+    Username  string `yaml:"username"`
+    Password  string `yaml:"password"`
+    SocksPort string `yaml:"socks_port"`
 }
 
 func generateRandomLetters(n int) string {
@@ -58,21 +59,18 @@ func parseEmailHeader(line string) EmailAddress {
     }
     line = strings.TrimSpace(line)
 
-    // Check for format: "Name <email>"
     if idx := strings.LastIndex(line, "<"); idx != -1 {
         name := strings.TrimSpace(line[:idx])
         email := strings.TrimSpace(strings.Trim(line[idx:], "<>"))
         return EmailAddress{Name: name, Address: email}
     }
 
-    // Check for format: "email (Name)"
     if idx := strings.Index(line, "("); idx != -1 {
         email := strings.TrimSpace(line[:idx])
         name := strings.TrimSpace(strings.Trim(line[idx:], "()"))
         return EmailAddress{Name: name, Address: email}
     }
 
-    // Just email
     return EmailAddress{Address: line}
 }
 
@@ -106,12 +104,12 @@ func main() {
     username := flag.String("u", "", "SMTP username (optional)")
     password := flag.String("p", "", "SMTP password (optional)")
     configFile := flag.String("c", "", "Path to config file (optional)")
+    socksPort := flag.String("s", "", "SOCKS5 proxy port (default: 9050)")
     flag.Parse()
 
     var host, port string
     var config *Config
 
-    // Load config file if -c flag is set
     if *configFile != "" {
         var err error
         config, err = loadConfig(*configFile)
@@ -128,56 +126,56 @@ func main() {
             *password = config.Password
         }
     } else {
-        // Use command-line arguments for host and port
         args := flag.Args()
         if len(args) != 2 {
-            fmt.Println("Usage: mm [-d] [-u username] [-p password] [-c configfile] [smtp-server port] < message_with_headers.txt")
+            fmt.Println("Usage: mm [-d] [-u username] [-p password] [-c configfile] [-s socks_port] [smtp-server port] < message_with_headers.txt")
             os.Exit(1)
         }
         host = args[0]
         port = args[1]
     }
 
+    // Determine SOCKS port (priority: command line > configuration > default value)
+    finalSocksPort := "9050"
+    if *socksPort != "" {
+        finalSocksPort = *socksPort
+    } else if config != nil && config.SocksPort != "" {
+        finalSocksPort = config.SocksPort
+    }
+
     scanner := bufio.NewScanner(os.Stdin)
     var headers, body string
     var fromEmail EmailAddress
 
-    // Default From: header
     fromEmail = EmailAddress{Name: "Mini Mailer", Address: "bounce.me@mini.mailer.msg"}
     hasFromHeader := false
 
-    // Read headers until an empty line is found
     for scanner.Scan() {
         line := scanner.Text()
         if line == "" {
-            break // Empty line indicates the end of headers
+            break
         }
-        headers += line + "\r\n" // Normalize to CRLF
+        headers += line + "\r\n"
 
-        // Check if the line is a From: header
         if strings.HasPrefix(line, "From:") {
             fromEmail = parseEmailHeader(line)
             hasFromHeader = true
         }
     }
 
-    // If no From: header was found, add the default one
     if !hasFromHeader {
         headers = fmt.Sprintf("From: %s <%s>\r\n", fromEmail.Name, fromEmail.Address) + headers
     }
 
-    // Read the rest as the message body
     for scanner.Scan() {
-        body += scanner.Text() + "\r\n" // Normalize to CRLF
+        body += scanner.Text() + "\r\n"
     }
 
-    // If no headers were found, exit with an error
     if headers == "" {
         fmt.Println("Error: No headers found in the input")
         os.Exit(1)
     }
 
-    // Extract the To: header
     toHeader := extractToHeader(headers)
     if toHeader == "" {
         fmt.Println("Error: No To: header found in the input")
@@ -186,10 +184,10 @@ func main() {
     toEmail := parseEmailHeader(toHeader)
 
     if *debug {
-        fmt.Printf("Connecting to %s:%s via SOCKS5 proxy\n", host, port)
+        fmt.Printf("Connecting to %s:%s via SOCKS5 proxy (port %s)\n", host, port, finalSocksPort)
     }
 
-    dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
+    dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:"+finalSocksPort, nil, proxy.Direct)
     if err != nil {
         fmt.Println("Error creating proxy dialer:", err)
         os.Exit(1)
@@ -250,14 +248,8 @@ func main() {
     }
 
     messageID := generateMessageID()
-
-    // Add the Message-ID header
     headers += fmt.Sprintf("Message-ID: %s\r\n", messageID)
-
-    // Add the User-Agent header
-    headers += fmt.Sprintf("User-Agent: Mini Mailer v0.1.0\r\n")
-
-    // Build the final message
+    headers += fmt.Sprintf("User-Agent: Mini Mailer v0.1.1\r\n")
     message := headers + "\r\n" + body
 
     if *debug {
