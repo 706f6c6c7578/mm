@@ -1,0 +1,3 @@
+socks_port: 1080
+smtp_host: hal.oc2mx.net
+smtp_port: 2525
